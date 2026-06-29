@@ -10,6 +10,6 @@ type Target struct {
 	ID       uuid.UUID
 	Name     string
 	Address  string
-	Interval time.Time
-	Timeout  time.Time
+	Interval time.Duration
+	Timeout  time.Duration
 }
