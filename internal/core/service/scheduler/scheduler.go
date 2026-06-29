@@ -33,7 +33,9 @@ func WithPublisher(pub Publisher) Option {
 }
 
 func New(opts ...Option) *Scheduler {
-	s := &Scheduler{}
+	s := &Scheduler{
+		registry: map[uuid.UUID]*targetController{},
+	}
 
 	for _, option := range opts {
 		option(s)
@@ -42,24 +44,24 @@ func New(opts ...Option) *Scheduler {
 	return s
 }
 
-func (s *Scheduler) ProcessCommands(ctx context.Context, commands ...model.Command) {
+func (s *Scheduler) ProcessCommands(ctx context.Context, commands []model.Command) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	for _, cmd := range commands {
 		switch cmd.Action {
 		case model.ActionAdd:
-			s.addTarget(ctx, cmd.Target)
+			s.executeAdd(ctx, cmd.Target)
 		case model.ActionRemove:
-			s.removeTarget(cmd.Target)
+			s.executeRemove(cmd.Target)
 		case model.ActionUpdate:
-			s.removeTarget(cmd.Target)
-			s.addTarget(ctx, cmd.Target)
+			s.executeRemove(cmd.Target)
+			s.executeAdd(ctx, cmd.Target)
 		}
 	}
 }
 
-func (s *Scheduler) addTarget(ctx context.Context, target model.Target) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
+func (s *Scheduler) executeAdd(ctx context.Context, target model.Target) {
 	if _, exist := s.registry[target.ID]; exist {
 		return
 	}
@@ -73,15 +75,13 @@ func (s *Scheduler) addTarget(ctx context.Context, target model.Target) {
 	go s.startTargetProcessing(ctx, target)
 }
 
-func (s *Scheduler) removeTarget(target model.Target) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if _, exist := s.registry[target.ID]; !exist {
+func (s *Scheduler) executeRemove(target model.Target) {
+	controller, exist := s.registry[target.ID]
+	if !exist {
 		return
 	}
 
-	s.registry[target.ID].cancel()
+	controller.cancel()
 	delete(s.registry, target.ID)
 }
 
@@ -89,9 +89,7 @@ func (s *Scheduler) startTargetProcessing(ctx context.Context, target model.Targ
 	ticker := time.NewTicker(target.Interval)
 	defer ticker.Stop()
 
-	if err := s.pub.Publish(ctx, target); err != nil {
-		return
-	}
+	_ = s.pub.Publish(ctx, target)
 
 	for {
 		select {
@@ -99,7 +97,7 @@ func (s *Scheduler) startTargetProcessing(ctx context.Context, target model.Targ
 			return
 		case <-ticker.C:
 			if err := s.pub.Publish(ctx, target); err != nil {
-				return
+				continue
 			}
 		}
 	}
