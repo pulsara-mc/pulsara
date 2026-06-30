@@ -19,7 +19,7 @@ type Publisher interface {
 }
 
 type Scheduler struct {
-	mu       sync.RWMutex
+	mu       sync.Mutex
 	registry map[uuid.UUID]*targetController
 	pub      Publisher
 }
@@ -88,8 +88,6 @@ func (s *Scheduler) executeRemove(target model.Target) {
 func (s *Scheduler) startTargetProcessing(ctx context.Context, target model.Target) {
 	ticker := time.NewTicker(target.Interval)
 	defer ticker.Stop()
-
-	_ = s.pub.Publish(ctx, target)
 
 	for {
 		select {
